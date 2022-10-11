@@ -667,6 +667,53 @@ spring:
 ----
 ====
 
+=== The `ClaimHeader` `GatewayFilter` Factory
+
+The `ClaimHeader` `GatewayFilter` Factory takes a case-sensitive `claim` and `headerName` parameter.
+It reads a JWT token from the `Authorization` request header, and then, it injects the claim matching with the `claim` value in a header named by the `headerName` parameter.
+
+The following example configures a `ClaimHeader` `GatewayFilter` to inject the `iss` field from the JWT token in a upstream request header `X-Issuer-Header`
+
+.application.yml
+====
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: add_claim_header_route
+        uri: https://example.org
+        filters:
+        - ClaimHeader=iss,X-Issuer-Header
+----
+====
+
+The following example configures a `ClaimHeader` `GatewayFilter` to extract multiple JWT token fields:
+
+.application.yml
+====
+[source,yaml]
+----
+spring:
+  cloud:
+    gateway:
+      routes:
+      - id: add_claim_header_route
+        uri: https://example.org
+        filters:
+        - ClaimHeader=sub,X-Sub-Header
+        - ClaimHeader=iss,X-Issuer-Header
+        - ClaimHeader=iat,X-Issued-At-Header
+----
+====
+
+[NOTE]
+=====
+* Single Sign-On or OAuth is not mandatory
+* In case the header is already present, the value(s) from the claim will be added to it. That is, previous values sent in the SCG request will be preserved
+=====
+
 === The `DedupeResponseHeader` `GatewayFilter` Factory
 
 The DedupeResponseHeader GatewayFilter factory takes a `name` parameter and an optional `strategy` parameter. `name` can contain a space-separated list of header names.

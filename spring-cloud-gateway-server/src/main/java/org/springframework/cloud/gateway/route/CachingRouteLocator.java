@@ -16,8 +16,11 @@
 
 package org.springframework.cloud.gateway.route;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
@@ -25,6 +28,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import reactor.cache.CacheFlux;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.GroupedFlux;
 
 import org.springframework.cloud.gateway.event.RefreshRoutesEvent;
 import org.springframework.cloud.gateway.event.RefreshRoutesResultEvent;
@@ -58,7 +62,32 @@ public class CachingRouteLocator
 	}
 
 	private Flux<Route> fetch() {
-		return this.delegate.getRoutes().sort(AnnotationAwareOrderComparator.INSTANCE);
+		//@formatter:off
+		final List<String> invalidGroups = Collections.synchronizedList(new ArrayList<>());
+		return this.delegate.getRoutes()
+							.onErrorContinue((error, obj) ->
+									invalidGroups.add(groupByMetadataGroupId(((RouteDefinition) obj)))
+							)
+							.groupBy(this::groupByMetadataGroupId)
+							.flatMap(group ->
+									group.bufferUntil(route -> invalidGroups.contains(groupByMetadataGroupId(route)))
+										 .flatMap(list -> Flux.fromIterable(list))
+							)
+							.filter(route -> !invalidGroups.contains(groupByMetadataGroupId(route)))
+							.sort(AnnotationAwareOrderComparator.INSTANCE);
+		//@formatter:on
+	}
+
+	private String groupByMetadataGroupId(Route route) {
+		return groupByMetadataGroupId(route.getMetadata());
+	}
+
+	private String groupByMetadataGroupId(RouteDefinition routeDef) {
+		return groupByMetadataGroupId(routeDef.getMetadata());
+	}
+
+	private String groupByMetadataGroupId(Map<String, Object> inMetadata) {
+		return Optional.ofNullable(inMetadata).map(metadata -> metadata.get("groupBy")).map(String::valueOf).orElse("");
 	}
 
 	@Override

@@ -69,9 +69,9 @@ public class CachingRouteLocator
 									invalidGroups.add(groupByMetadataGroupId(((RouteDefinition) obj)))
 							)
 							.groupBy(this::groupByMetadataGroupId)
-							.flatMap(group ->
+							.flatMapSequential(group ->
 									group.bufferUntil(route -> invalidGroups.contains(groupByMetadataGroupId(route)))
-										 .flatMap(list -> Flux.fromIterable(list))
+										 .flatMap(list -> Flux.fromIterable(list)), Integer.MAX_VALUE
 							)
 							.filter(route -> !invalidGroups.contains(groupByMetadataGroupId(route)))
 							.sort(AnnotationAwareOrderComparator.INSTANCE);

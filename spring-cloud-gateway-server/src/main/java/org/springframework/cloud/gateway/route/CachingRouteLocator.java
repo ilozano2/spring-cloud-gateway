@@ -25,7 +25,6 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import reactor.cache.CacheFlux;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 import org.springframework.cloud.gateway.event.RefreshRoutesEvent;
 import org.springframework.cloud.gateway.event.RefreshRoutesResultEvent;
@@ -58,12 +57,28 @@ public class CachingRouteLocator
 		routes = CacheFlux.lookup(cache, CACHE_KEY, Route.class).onCacheMissResume(this::fetch);
 	}
 
-	private Flux<Route> fetch() {
-		return this.delegate.getRoutes().sort(AnnotationAwareOrderComparator.INSTANCE);
+	private Flux<Route> unsortedFetch() {
+		return unsortedFetch(null);
 	}
 
-	private Flux<Route> fetch(Map<String, Object> metadata) {
-		return this.delegate.getRoutesByMetadata(metadata).sort(AnnotationAwareOrderComparator.INSTANCE);
+	private Flux<Route> unsortedFetch(Map<String, Object> metadata) {
+		return this.delegate.getRoutesByMetadata(metadata);
+	}
+
+	private Flux<Route> fetch() {
+		return fetch(null);
+	}
+
+	private Flux<Route> fetch(RefreshRoutesEvent event) {
+		final Flux<Route> fetchedRoutes;
+		if (event != null && event.isScoped() && this.cache.containsKey(CACHE_KEY)) {
+			fetchedRoutes = Flux.concat(unsortedFetch(event.getMetadata()), getNonScopedRoutes(event));
+		}
+		else {
+			fetchedRoutes = unsortedFetch();
+		}
+
+		return fetchedRoutes.sort(AnnotationAwareOrderComparator.INSTANCE);
 	}
 
 	@Override
@@ -83,27 +98,10 @@ public class CachingRouteLocator
 	@Override
 	public void onApplicationEvent(RefreshRoutesEvent event) {
 		try {
-			if (this.cache.containsKey(CACHE_KEY) && event.isScoped()) {
-				final Mono<List<Route>> scopedRoutes = fetch(event.getMetadata()).collect(Collectors.toList())
-						.onErrorResume(s -> Mono.just(List.of()));
-
-				scopedRoutes.subscribe(scopedRoutesList -> {
-					Flux.concat(Flux.fromIterable(scopedRoutesList), getNonScopedRoutes(event)).materialize()
-							.collect(Collectors.toList()).subscribe(signals -> {
-								applicationEventPublisher.publishEvent(new RefreshRoutesResultEvent(this));
-								cache.put(CACHE_KEY, signals);
-							}, this::handleRefreshError);
-				}, this::handleRefreshError);
-			}
-			else {
-				final Mono<List<Route>> allRoutes = fetch().collect(Collectors.toList());
-
-				allRoutes.subscribe(list -> Flux.fromIterable(list).materialize().collect(Collectors.toList())
-						.subscribe(signals -> {
-							applicationEventPublisher.publishEvent(new RefreshRoutesResultEvent(this));
-							cache.put(CACHE_KEY, signals);
-						}, this::handleRefreshError), this::handleRefreshError);
-			}
+			fetch(event).materialize().collect(Collectors.toList()).subscribe(signals -> {
+				applicationEventPublisher.publishEvent(new RefreshRoutesResultEvent(this));
+				cache.put(CACHE_KEY, signals);
+			}, this::handleRefreshError);
 		}
 		catch (Throwable e) {
 			handleRefreshError(e);
